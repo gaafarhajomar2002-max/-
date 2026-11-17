@@ -123,7 +123,7 @@ class Builder:
         self.bm = 0
         self.h1s = []          # (text, bookmark)
         self.current_h1 = ""
-        self.collected = {k: [] for k in ("doctor", "define", "why", "problem", "exam")}
+        self.collected = {k: [] for k in ("admin", "doctor", "define", "why", "problem", "exam")}
         credits = base / "images" / "credits.json"
         self.credits = json.loads(credits.read_text(encoding="utf-8")) if credits.exists() else {}
         self._setup_styles()
@@ -332,6 +332,7 @@ class Builder:
         "why":      ("∵ علّل",                            "283593", "E8EAF6"),
         "problem":  ("∑ مسألة محلولة",                    "37474F", "ECEFF1"),
         "check":    ("⚠ تحقّق من هذه النقطة (غير واضحة بالتسجيل)", "D84315", "FBE9E7"),
+        "admin":    ("☰ معلومة من الدكتور (امتحان، مراجع، مواعيد)", "5D4037", "EFEBE9"),
         "style":    ("نمط الدكتور في الشرح والأسئلة",     "6A4C93", "F1ECF8"),
     }
 
@@ -458,7 +459,8 @@ class Builder:
         # دليل الرموز
         p = self.para(space_after=4, keep=True)
         self.run(p, "دليل الصناديق في هذا الملف", bold=True, size=13, color=self.c["dk"])
-        legend = ["doctor", "exam", "define", "why", "problem", "note", "remember", "tip", "mistake", "check"]
+        legend = ["doctor", "exam", "define", "why", "problem", "note", "remember", "tip", "mistake", "check",
+                  "admin", "summary"]
         t = self.table((len(legend) + 1) // 2, 2)
         for i, k in enumerate(legend):
             title, bar, bg = self.CALLOUTS[k]
@@ -635,6 +637,18 @@ class Builder:
                   "حتى تراجعها بسرعة ليلة الامتحان.")
         ordinals = iter(["أولاً", "ثانياً", "ثالثاً", "رابعاً", "خامساً", "سادساً"])
         c = self.collected
+
+        if c["admin"]:
+            self.heading(2, f"{next(ordinals)}: معلومات من الدكتور عن الامتحان والمقرر ({len(c['admin'])})")
+            for sec, head, body in c["admin"]:
+                p = self.para(space_after=3)
+                self.indent_start(p, 0.9, 0.7)
+                self.run(p, "☰  ", bold=True, color=RGBColor.from_string("5D4037"))
+                self.rich(p, head)
+                for ln in body:
+                    q = self.para(space_after=2)
+                    self.indent_start(q, 1.6, 0)
+                    self.rich(q, re.sub(r"^[-*•]\s+", "• ", ln), size=12)
 
         if c["doctor"]:
             self.heading(2, f"{next(ordinals)}: ما شدّد عليه الدكتور ({len(c['doctor'])})")

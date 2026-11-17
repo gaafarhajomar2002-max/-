@@ -106,6 +106,8 @@ def main() -> None:
     ap.add_argument("--multilingual", action="store_true",
                     help="كشف اللغة لكل مقطع (مفيد إذا قرأ الدكتور جملاً إنجليزية كاملة). "
                          "الافتراضي: عربي فقط، لأنه أأمن مع اللهجة السورية")
+    ap.add_argument("--start", default=None, help="بداية الجزء المطلوب (hh:mm:ss) — مثلاً لتسجيل فيه محاضرتان")
+    ap.add_argument("--end", default=None, help="نهاية الجزء المطلوب (hh:mm:ss)")
     ap.add_argument("--threads", type=int, default=os.cpu_count() or 4)
     args = ap.parse_args()
 
@@ -127,8 +129,13 @@ def main() -> None:
 
     # نقرأ الصوت بـ ffmpeg مباشرة كمصفوفة (بدون PyAV)
     import numpy as np
+    def secs(t):
+        parts = [float(x) for x in str(t).split(":")]
+        return sum(v * 60 ** k for k, v in enumerate(reversed(parts)))
+    t_off = secs(args.start) if args.start else 0.0
+    rng = (["-ss", str(t_off)] if args.start else []) + (["-to", str(secs(args.end))] if args.end else [])
     raw = subprocess.check_output(
-        ["ffmpeg", "-loglevel", "error", "-i", str(wav), "-f", "f32le", "-ac", "1", "-ar", "16000", "-"]
+        ["ffmpeg", "-loglevel", "error", "-i", str(wav), *rng, "-f", "f32le", "-ac", "1", "-ar", "16000", "-"]
     )
     audio = np.frombuffer(raw, dtype=np.float32)
 
@@ -153,15 +160,16 @@ def main() -> None:
         text = seg.text.strip()
         if not text or is_hallucination(text):
             continue
+        seg_start, seg_end = seg.start + t_off, seg.end + t_off  # أوقات حسب التسجيل الأصلي
         flag = "⚠ " if uncertain(seg) else ""
         if flag:
-            unsure.append(f"[{fmt_ts(seg.start)} – {fmt_ts(seg.end)}] {text}")
-        lines.append(f"[{fmt_ts(seg.start)}] {flag}{text}")
+            unsure.append(f"[{fmt_ts(seg_start)} – {fmt_ts(seg_end)}] {text}")
+        lines.append(f"[{fmt_ts(seg_start)}] {flag}{text}")
         live.write(lines[-1] + "\n"); live.flush()
         plain.append(text)
-        srt.append(f"{i}\n{fmt_ts(seg.start, True)} --> {fmt_ts(seg.end, True)}\n{text}\n")
+        srt.append(f"{i}\n{fmt_ts(seg_start, True)} --> {fmt_ts(seg_end, True)}\n{text}\n")
         el = time.time() - t0
-        print(f"\r{fmt_ts(seg.end)} / {fmt_ts(dur)}  ({seg.end / dur:5.1%})  مضى {fmt_ts(el)}",
+        print(f"\r{fmt_ts(seg_end)} / {fmt_ts(dur)}  ({seg_end / dur:5.1%})  مضى {fmt_ts(el)}",
               end="", flush=True)
 
     live.close()

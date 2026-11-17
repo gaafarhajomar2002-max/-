@@ -75,10 +75,12 @@ def popcount32(x: np.ndarray) -> np.ndarray:
     return (_POP[x & 0xFF] + _POP[(x >> 8) & 0xFF] + _POP[(x >> 16) & 0xFF] + _POP[x >> 24]).astype(np.int32)
 
 
-def overlap(a: np.ndarray, b: np.ndarray):
-    """أفضل إزاحة بين بصمتين وطول الجزء المتطابق (بالثواني). يعتمد على تطابق القيم ثم التحقق بنسبة الخطأ بالبتات."""
+def overlap(a: np.ndarray, b: np.ndarray, min_abs_off: int = 0, detail: bool = False):
+    """أفضل إزاحة بين بصمتين وطول الجزء المتطابق (بالثواني). يعتمد على تطابق القيم ثم التحقق بنسبة الخطأ بالبتات.
+    min_abs_off: لتجاهل الإزاحات الصغيرة (عند مقارنة الملف بنفسه لكشف جزء مكرر داخله).
+    detail=True يعيد أيضاً (بداية، نهاية) الجزء المتطابق بالثواني داخل a."""
     if len(a) < 50 or len(b) < 50:
-        return 0, 0.0
+        return (0, 0.0, None) if detail else (0, 0.0)
     # مطابقة على أعلى 20 بت (أكثر تحمّلاً لإعادة الترميز)
     ka, kb = a >> 12, b >> 12
     order = np.argsort(kb, kind="stable")
@@ -90,10 +92,11 @@ def overlap(a: np.ndarray, b: np.ndarray):
         if hi[i] - lo[i] > 20:  # قيمة شائعة جداً (صمت) لا تفيد
             continue
         offs.extend((order[lo[i]:hi[i]] - i).tolist())
+    offs = [o for o in offs if abs(o) >= min_abs_off]
     if not offs:
-        return 0, 0.0
+        return (0, 0.0, None) if detail else (0, 0.0)
     vals, counts = np.unique(np.array(offs), return_counts=True)
-    best_secs, best_off = 0.0, 0
+    best_secs, best_off, best_rng = 0.0, 0, None
     for off in vals[np.argsort(counts)[-5:]]:  # أفضل 5 إزاحات مرشحة
         ia = np.arange(max(0, -off), min(len(a), len(b) - off))
         if len(ia) < 50:
@@ -102,10 +105,27 @@ def overlap(a: np.ndarray, b: np.ndarray):
         # تنعيم: نافذة ~5 ثوان، يعتبر متطابقاً إذا متوسط الخطأ < 10 بتات من 32
         k = 40
         sm = np.convolve(err, np.ones(k) / k, mode="same")
-        secs = float((sm < 10).sum() * ITEM_SEC)
+        ok = sm < 10
+        secs = float(ok.sum() * ITEM_SEC)
         if secs > best_secs:
             best_secs, best_off = secs, int(off)
-    return best_off, best_secs
+            # المدى = أطول جزء متصل متطابق (لا أول/آخر نقطة، فقد تكون تطابقاً عشوائياً معزولاً)
+            best_rng = None
+            if ok.any():
+                d = np.diff(np.concatenate(([0], ok.astype(np.int8), [0])))
+                st, en = np.nonzero(d == 1)[0], np.nonzero(d == -1)[0]
+                k = int(np.argmax(en - st))
+                best_rng = (float(ia[st[k]] * ITEM_SEC), float(ia[en[k] - 1] * ITEM_SEC))
+    return (best_off, best_secs, best_rng) if detail else (best_off, best_secs)
+
+
+def gaps(p: Path, noise_db: int = -38, min_sec: int = 45):
+    """فترات صمت طويلة (استراحة، انقطاع، نهاية محاضرة) بـ silencedetect."""
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(p), "-af", f"silencedetect=noise={noise_db}dB:d={min_sec}",
+                          "-f", "null", "-"], capture_output=True, text=True).stderr
+    starts = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", out)]
+    ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", out)]
+    return [(s0, e0) for s0, e0 in zip(starts, ends)]
 
 
 # ───────────── تخمين المادة ─────────────
@@ -145,11 +165,24 @@ def guess_course(text: str, terms) -> list:
     return sorted(scores, reverse=True)[:3]
 
 
-def snippets_text(p: Path, dur: float, model, prompt=None):
+def snippet_times(dur: float, step: float):
+    """أوقات المقاطع: بعد دقيقة من البداية، ثم كل step ثانية، وقبل النهاية بدقيقة ونصف."""
+    if dur <= 0:
+        return []
+    ts = [min(60.0, dur * 0.1)]
+    t = step
+    while t < dur - 120:
+        ts.append(t)
+        t += step
+    if dur > 240:
+        ts.append(dur - 90)
+    return ts
+
+
+def snippets_text(p: Path, dur: float, model, prompt=None, step=600.0, length=35):
     out = []
-    for frac in (0.08, 0.45, 0.80):
-        start = max(0.0, dur * frac)
-        raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", f"{start:.1f}", "-t", "50", "-i", str(p),
+    for start in snippet_times(dur, step):
+        raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", f"{start:.1f}", "-t", str(length), "-i", str(p),
                               "-f", "f32le", "-ac", "1", "-ar", "16000", "-"], capture_output=True).stdout
         audio = np.frombuffer(raw, dtype=np.float32)
         if len(audio) < 16000 * 3:
@@ -173,6 +206,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("folder")
     ap.add_argument("--no-asr", action="store_true")
+    ap.add_argument("--step", type=float, default=600, help="ثوانٍ بين المقاطع المسموعة (افتراضي 10 دقائق)")
     a = ap.parse_args()
     folder = Path(a.folder).resolve()
     files = sorted(p for p in folder.rglob("*") if p.suffix.lower() in AUDIO_EXT and "_triage" not in p.parts)
@@ -188,6 +222,12 @@ def main():
         d["sha256"] = sha256(p)
         print(f"[{i}/{len(files)}] بصمة {d['file']} ({fmt_dur(d.get('duration', 0))})", flush=True)
         d["_fp"] = fingerprint(p)
+        # جزء مكرر داخل الملف نفسه (≥ 60 ثانية، بإزاحة ≥ 90 ثانية)
+        off, secs, rng = overlap(d["_fp"], d["_fp"], min_abs_off=int(90 / ITEM_SEC), detail=True)
+        if secs >= 60 and rng:
+            t1, t2 = sorted((rng[0], rng[0] + off * ITEM_SEC))
+            d["self_repeat"] = {"seconds": round(secs), "first": fmt_dur(t1), "again_at": fmt_dur(t2)}
+        d["gaps"] = [{"from": fmt_dur(s0), "to": fmt_dur(e0), "sec": round(e0 - s0)} for s0, e0 in gaps(p)]
         info.append(d)
 
     # مجموعات التكرار (union-find)
@@ -240,8 +280,16 @@ def main():
             if d.get("dup_group") and not d.get("keep"):
                 continue  # لا داعي لسماع النسخ المكررة
             print(f"[{i}/{len(info)}] سماع مقاطع من {d['file']}", flush=True)
-            d["snippets"] = snippets_text(files[i - 1], d.get("duration", 0), model)
+            d["snippets"] = snippets_text(files[i - 1], d.get("duration", 0), model, step=a.step)
             d["course_guess"] = guess_course(" ".join(s["text"] for s in d["snippets"]), terms)
+            prev = None
+            for sn in d["snippets"]:
+                g = guess_course(sn["text"], terms)
+                sn["guess"] = g[0][2] if g and g[0][0] >= 2 else ""
+                if sn["guess"] and prev and sn["guess"] != prev:
+                    d.setdefault("topic_changes", []).append(f"{fmt_dur(sn['at'])}: {prev} ← {sn['guess']}")
+                if sn["guess"]:
+                    prev = sn["guess"]
 
     for d in info:
         d.pop("_fp", None)
@@ -261,13 +309,26 @@ def main():
     if relations:
         lines += ["", "## التكرارات", ""]
         lines += [f"- `{r['a']}` ↔ `{r['b']}`: {r['kind']} (مشترك {r['shared']})" for r in relations]
-    lines += ["", "## مقاطع من كل ملف", ""]
+    inner = [d for d in info if d.get("self_repeat") or d.get("topic_changes") or d.get("gaps")]
+    if inner:
+        lines += ["", "## داخل الملفات: تكرار، تغيّر مادة، استراحات", ""]
+        for d in inner:
+            lines.append(f"- **{d['file']}**")
+            if d.get("self_repeat"):
+                r = d["self_repeat"]
+                lines.append(f"  - جزء مكرر داخل الملف ≈ {r['seconds']} ث: من {r['first']} ويتكرر عند {r['again_at']}")
+            for c in d.get("topic_changes", []):
+                lines.append(f"  - احتمال تغيّر المادة عند {c}")
+            for g in d.get("gaps", []):
+                lines.append(f"  - صمت/انقطاع من {g['from']} إلى {g['to']} ({g['sec']} ث)")
+    lines += ["", "## خط زمني لكل ملف (مقطع كل بضع دقائق)", ""]
     for d in sorted(info, key=sort_key):
         if not d.get("snippets"):
             continue
         lines.append(f"### {d['file']}  ({fmt_dur(d.get('duration', 0))})")
         for s in d["snippets"]:
-            lines.append(f"- **[{fmt_dur(s['at'])}]** {s['text'][:400] or '(لا كلام / صمت)'}")
+            tag = f" `{s['guess']}`" if s.get("guess") else ""
+            lines.append(f"- **[{fmt_dur(s['at'])}]**{tag} {s['text'][:300] or '(لا كلام / صمت)'}")
         lines.append("")
     (outdir / "report.md").write_text("\n".join(lines), encoding="utf-8")
     print(f"\nالتقرير: {outdir / 'report.md'}")
