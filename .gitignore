@@ -3,3 +3,27 @@ __pycache__/
 **/_build/
 **/_audio16k.wav
 **/_cover.html
+inbox/_triage/
+# ملفات الصوت كبيرة: لا تُرفع على GitHub (التفريغ والوورد يُرفعان)
+inbox/**/*.m4a
+inbox/**/*.mp3
+inbox/**/*.wav
+inbox/**/*.ogg
+inbox/**/*.opus
+inbox/**/*.aac
+inbox/**/*.amr
+inbox/**/*.3gp
+inbox/**/*.mp4
+inbox/**/*.webm
+inbox/**/*.flac
+lectures/**/*.m4a
+lectures/**/*.mp3
+lectures/**/*.wav
+lectures/**/*.ogg
+lectures/**/*.opus
+lectures/**/*.aac
+lectures/**/*.amr
+lectures/**/*.3gp
+lectures/**/*.mp4
+lectures/**/*.webm
+lectures/**/*.flac
