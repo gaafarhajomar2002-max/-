@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+lectures/*/_build/
+lectures/*/_audio16k.wav
+lectures/*/_cover.html
