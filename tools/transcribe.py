@@ -2,14 +2,20 @@
 """تفريغ محاضرة صوتية عربية (لهجة سورية غالباً) إلى نص.
 
 الاستخدام:
-    python3 tools/transcribe.py lectures/<name>/audio.m4a [part2.m4a ...] [--model large-v3|turbo] [--out DIR]
+    python3 tools/transcribe.py lectures/<course>/<NN-topic>/audio.m4a [part2.m4a ...]
+            [--course food-chem] [--model large-v3|turbo] [--out DIR]
+
+المادة (--course) تُكتشف تلقائياً من المسار lectures/<course>/... وتعطي النموذج مفردات المادة
+(من courses.json)، وهذا يحسّن كتابة المصطلحات العلمية كثيراً.
 
 الخرج (في نفس مجلد الصوت افتراضياً):
-    transcript.txt        نص مع طوابع زمنية [hh:mm:ss] لكل مقطع
+    transcript.txt        نص مع طوابع زمنية [hh:mm:ss] لكل مقطع (⚠ = مقطع ثقة النموذج فيه منخفضة)
+    transcript_uncertain.txt  قائمة المقاطع غير الأكيدة للمراجعة
     transcript_plain.txt  نص متصل بدون طوابع
     transcript.srt        ترجمة بصيغة SRT (للمراجعة مع الصوت)
 """
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -22,12 +28,28 @@ MODELS = {
 }
 
 # يساعد النموذج على توقع المفردات: لهجة شامية + مصطلحات تغذية/طب.
-INITIAL_PROMPT = (
-    "محاضرة جامعية في كلية التغذية والصحة باللهجة السورية. "
-    "يشرح الدكتور عن البروتينات والكربوهيدرات والدهون والفيتامينات والمعادن، "
-    "الاستقلاب، السعرات الحرارية، الجهاز الهضمي، الكبد، الأنسولين، الغلوكوز. "
-    "يعني هلق منشوف، هاد الشي مهم، انتبهوا عليه، بيجي بالامتحان."
+DEFAULT_PROMPT = (
+    "محاضرة جامعية في كلية التغذية العلاجية باللهجة السورية. "
+    "البروتينات والكربوهيدرات والدهون والفيتامينات والمعادن، الاستقلاب، السعرات الحرارية."
 )
+DIALECT_TAIL = " يعني هلق منشوف، هاد الشي مهم، انتبهوا عليه، بيجي بالامتحان، عرّف وعلّل."
+COURSES = Path(__file__).resolve().parent.parent / "courses.json"
+
+
+def course_prompt(course: str | None, srcs: list[Path]) -> tuple[str | None, str]:
+    data = json.loads(COURSES.read_text(encoding="utf-8")) if COURSES.exists() else {}
+    if not course:  # اكتشاف من المسار: lectures/<course>/...
+        for part in srcs[0].parts:
+            if part in data and not part.startswith("_"):
+                course = part
+                break
+    if course and course in data:
+        return course, data[course]["prompt"] + DIALECT_TAIL
+    return None, DEFAULT_PROMPT + DIALECT_TAIL
+
+
+def uncertain(seg) -> bool:
+    return seg.avg_logprob < -0.8 or seg.compression_ratio > 2.4 or seg.no_speech_prob > 0.5
 
 
 # جمل يختلقها Whisper عادةً في الصمت/الضجيج — تُحذف إذا كانت هي كل المقطع.
@@ -79,6 +101,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("audio", nargs="+", help="ملف صوت واحد أو عدة أجزاء بالترتيب")
     ap.add_argument("--model", default="large-v3", choices=MODELS)
+    ap.add_argument("--course", default=None, help="مفتاح المادة من courses.json (يُكتشف من المسار إن لم يُعطَ)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--multilingual", action="store_true",
                     help="كشف اللغة لكل مقطع (مفيد إذا قرأ الدكتور جملاً إنجليزية كاملة). "
@@ -95,7 +118,8 @@ def main() -> None:
     dur = float(subprocess.check_output(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(wav)]
     ).strip())
-    print(f"مدة الصوت: {fmt_ts(dur)}", flush=True)
+    course, prompt = course_prompt(args.course, srcs)
+    print(f"مدة الصوت: {fmt_ts(dur)}  |  المادة: {course or 'عامة'}  |  النموذج: {args.model}", flush=True)
 
     from faster_whisper import WhisperModel
     model = WhisperModel(ensure_model(args.model), device="cpu",
@@ -117,30 +141,37 @@ def main() -> None:
         beam_size=5,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 700},
-        initial_prompt=INITIAL_PROMPT,
+        initial_prompt=prompt,
         condition_on_previous_text=False,  # يقلل التكرار/الهلوسة بالتسجيلات الطويلة
         temperature=[0.0, 0.2, 0.4],
         no_speech_threshold=0.6,
     )
 
-    lines, plain, srt = [], [], []
+    lines, plain, srt, unsure = [], [], [], []
+    live = (out / "transcript.txt").open("w", encoding="utf-8")  # يُكتب أولاً بأول (يمكن قراءته أثناء التفريغ)
     for i, seg in enumerate(segments, 1):
         text = seg.text.strip()
         if not text or is_hallucination(text):
             continue
-        lines.append(f"[{fmt_ts(seg.start)}] {text}")
+        flag = "⚠ " if uncertain(seg) else ""
+        if flag:
+            unsure.append(f"[{fmt_ts(seg.start)} – {fmt_ts(seg.end)}] {text}")
+        lines.append(f"[{fmt_ts(seg.start)}] {flag}{text}")
+        live.write(lines[-1] + "\n"); live.flush()
         plain.append(text)
         srt.append(f"{i}\n{fmt_ts(seg.start, True)} --> {fmt_ts(seg.end, True)}\n{text}\n")
         el = time.time() - t0
         print(f"\r{fmt_ts(seg.end)} / {fmt_ts(dur)}  ({seg.end / dur:5.1%})  مضى {fmt_ts(el)}",
               end="", flush=True)
 
-    (out / "transcript.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    live.close()
+    (out / "transcript_uncertain.txt").write_text("\n".join(unsure) + "\n", encoding="utf-8")
     (out / "transcript_plain.txt").write_text(" ".join(plain) + "\n", encoding="utf-8")
     (out / "transcript.srt").write_text("\n".join(srt), encoding="utf-8")
     wav.unlink(missing_ok=True)
     el = time.time() - t0
     print(f"\nانتهى خلال {fmt_ts(el)} (سرعة {dur / el:.2f}x من الزمن الحقيقي) → {out}")
+    print(f"مقاطع غير أكيدة: {len(unsure)} من {len(lines)} (راجع transcript_uncertain.txt)")
 
 
 if __name__ == "__main__":

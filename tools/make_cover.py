@@ -23,6 +23,7 @@ THEMES = {
     "biochem": ("#2f5d9e", "#142c4f", "#e8eff9", "#f28f3b"),
     "food": ("#c4622d", "#5e2a10", "#fcefe6", "#5aa469"),
     "health": ("#1f7a8c", "#0e3b44", "#e3f3f6", "#e9c46a"),
+    "pharma": ("#6a4c93", "#2f1f4a", "#f1ecf8", "#f2a541"),
 }
 
 

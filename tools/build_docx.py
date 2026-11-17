@@ -74,7 +74,35 @@ def put(parent, tag, **attrs):
 
 
 AR = re.compile(r"[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]")
-LATIN_CHUNK = re.compile(r"[A-Za-z][A-Za-z0-9 .,'’\-/+()%:=]*[A-Za-z0-9)%]|[A-Za-z]")
+NON_AR = re.compile(r"[^\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+")
+EDGE_PUNCT = " \t.,،:;؛!?؟\"'«»"
+
+
+def split_scripts(text: str):
+    """يقسم النص إلى (مقطع, rtl). المقاطع اللاتينية/الرقمية (مصطلحات، صيغ، أرقام) تبقى LTR كوحدة واحدة،
+    والأقواس غير المتوازنة والترقيم على أطرافها تُترك للعربي حتى لا ينقلب ترتيبها."""
+    out, pos = [], 0
+    for m in NON_AR.finditer(text):
+        a, b = m.start(), m.end()
+        chunk = text[a:b]
+        if not re.search(r"[A-Za-z0-9\u00B5\u0370-\u03FF]", chunk):
+            continue  # فراغات/ترقيم فقط: تبقى مع العربي
+        # قصّ الأطراف: ترقيم، فراغات، وأقواس غير متوازنة
+        while chunk and (chunk[0] in EDGE_PUNCT or (chunk[0] == "(" and chunk.count("(") > chunk.count(")"))
+                         or chunk[0] == ")"):
+            chunk, a = chunk[1:], a + 1
+        while chunk and (chunk[-1] in EDGE_PUNCT or (chunk[-1] == ")" and chunk.count(")") > chunk.count("("))
+                         or chunk[-1] == "("):
+            chunk, b = chunk[:-1], b - 1
+        if not chunk:
+            continue
+        if a > pos:
+            out.append((text[pos:a], True))
+        out.append((chunk, False))
+        pos = b
+    if pos < len(text):
+        out.append((text[pos:], True))
+    return out
 
 
 class Builder:
@@ -89,7 +117,7 @@ class Builder:
         self.bm = 0
         self.h1s = []          # (text, bookmark)
         self.current_h1 = ""
-        self.doctor_points, self.exam_qs = [], []
+        self.collected = {k: [] for k in ("doctor", "define", "why", "problem", "exam")}
         credits = base / "images" / "credits.json"
         self.credits = json.loads(credits.read_text(encoding="utf-8")) if credits.exists() else {}
         self._setup_styles()
@@ -139,18 +167,13 @@ class Builder:
             p.paragraph_format.keep_with_next = True
         return p
 
-    def run(self, p, text, bold=False, italic=False, size=None, color=None, highlight=False):
+    def run(self, p, text, bold=False, italic=False, size=None, color=None, highlight=False, vert=None):
         """يقسم النص إلى مقاطع عربية/لاتينية حتى تظهر المصطلحات الإنجليزية بالاتجاه الصحيح."""
-        pos = 0
-        pieces = []
-        for m in LATIN_CHUNK.finditer(text):
-            if m.start() > pos:
-                pieces.append((text[pos:m.start()], True))
-            pieces.append((m.group(0), False))
-            pos = m.end()
-        if pos < len(text):
-            pieces.append((text[pos:], True))
-        for chunk, rtl in pieces:
+        for chunk, rtl in split_scripts(text):
+            if not rtl:
+                # علامة اتجاه LRM مخفية على الطرفين: تُبقي الصيغة/المصطلح وحدة واحدة من اليسار لليمين
+                # (بدونها تنتقل + و - والأقواس والأرقام في أول الصيغة إلى الجهة الخطأ داخل السطر العربي)
+                chunk = "\u200e" + chunk + "\u200e"
             r = p.add_run(chunk)
             rp = r._r.get_or_add_rPr()
             put(rp, "w:rFonts", ascii=self.font, hAnsi=self.font, cs=self.font)
@@ -164,23 +187,29 @@ class Builder:
                 r.font.size = Pt(size); put(rp, "w:szCs", val=int(size * 2))
             if highlight:
                 put(rp, "w:shd", val="clear", color="auto", fill="FFF1A8")
-            if rtl and (AR.search(chunk) or not re.search(r"[0-9A-Za-z]", chunk)):
+            if vert:
+                put(rp, "w:vertAlign", val=vert)
+            if rtl:
                 put(rp, "w:rtl")
         return p
 
-    def rich(self, p, text, size=None, color=None, base_bold=False):
-        """**غامق** ==تظليل== *مائل*"""
-        for tok in re.split(r"(\*\*.+?\*\*|==.+?==|(?<!\*)\*[^*]+?\*(?!\*))", text):
+    def rich(self, p, text, size=None, color=None, base_bold=False, italic=False, highlight=False):
+        """**غامق** ==تظليل== *مائل*  H~2~O (سفلي)  Ca^2+^ (علوي) — ويمكن تداخلها."""
+        kw = dict(size=size, color=color)
+        for tok in re.split(r"(\*\*.+?\*\*|==.+?==|(?<!\*)\*[^*]+?\*(?!\*)|~[^~\s]+~|\^[^^\s]+\^)", text):
             if not tok:
                 continue
-            if tok.startswith("**"):
-                self.run(p, tok[2:-2], bold=True, size=size, color=color)
-            elif tok.startswith("=="):
-                self.run(p, tok[2:-2], bold=True, size=size, color=color, highlight=True)
+            if len(tok) > 2 and tok[0] == tok[-1] and tok[0] in "~^":
+                self.run(p, tok[1:-1], bold=base_bold, italic=italic, highlight=highlight,
+                         vert="subscript" if tok[0] == "~" else "superscript", **kw)
+            elif tok.startswith("**") and len(tok) > 4:
+                self.rich(p, tok[2:-2], base_bold=True, italic=italic, highlight=highlight, **kw)
+            elif tok.startswith("==") and len(tok) > 4:
+                self.rich(p, tok[2:-2], base_bold=True, italic=italic, highlight=True, **kw)
             elif tok.startswith("*") and len(tok) > 2:
-                self.run(p, tok[1:-1], italic=True, size=size, color=color, bold=base_bold)
+                self.rich(p, tok[1:-1], base_bold=base_bold, italic=True, highlight=highlight, **kw)
             else:
-                self.run(p, tok, size=size, color=color, bold=base_bold)
+                self.run(p, tok, bold=base_bold, italic=italic, highlight=highlight, **kw)
         return p
 
     def shade_par(self, p, fill):
@@ -290,6 +319,10 @@ class Builder:
         "tip":      ("✓ طريقة للحفظ",                     "6A4C93", "F1ECF8"),
         "mistake":  ("✗ خطأ شائع",                        "C4622D", "FCEFE6"),
         "summary":  ("≡ خلاصة الفصل",                     "1F7A8C", "E3F3F6"),
+        "define":   ("§ عرّف",                            "00796B", "E0F2F1"),
+        "why":      ("∵ علّل",                            "283593", "E8EAF6"),
+        "problem":  ("∑ مسألة محلولة",                    "37474F", "ECEFF1"),
+        "check":    ("⚠ تحقّق من هذه النقطة (غير واضحة بالتسجيل)", "D84315", "FBE9E7"),
         "style":    ("نمط الدكتور في الشرح والأسئلة",     "6A4C93", "F1ECF8"),
     }
 
@@ -303,24 +336,27 @@ class Builder:
         p = self.cell_para(c0, first=True); p.paragraph_format.space_after = Pt(0)
         self.run(p, title, bold=True, size=11.5, color=RGBColor(255, 255, 255))
         p = self.cell_para(c1, first=True)
-        if kind == "exam":
-            self.rich(p, head, base_bold=True)
-            for ln in body:
-                q = self.cell_para(c1)
-                if re.match(r"^(الجواب|الفكرة|الحل)\s*[:：]", ln):
-                    k, v = re.split(r"[:：]", ln, maxsplit=1)
-                    self.run(q, f"{k}: ", bold=True, color=RGBColor.from_string(bar))
-                    self.rich(q, v.strip())
-                else:
-                    self.list_or_rich(q, ln)
-        else:
-            if head:
-                self.rich(p, head)
-            for ln in body:
-                self.list_or_rich(self.cell_para(c1) if head or ln is not body[0] else p, ln)
+        bold_head = kind in self.QA_KINDS
+        if head:
+            self.rich(p, head, base_bold=bold_head)
+        for j, ln in enumerate(body):
+            q = self.cell_para(c1) if (head or j) else p
+            self.labeled_line(q, ln, RGBColor.from_string(bar))
         self.keep_together(t)
         sp = self.para(space_after=2)  # فاصل بعد الصندوق
         sp.paragraph_format.line_spacing = 0.6
+
+    QA_KINDS = ("exam", "define", "why", "problem")
+    LABEL_RE = re.compile(r"^(الجواب|الفكرة|الحل|لأن|لأنّ|السبب|التعريف|المعطيات|المطلوب|القانون|النتيجة|"
+                          r"التعويض|الوحدة|ملاحظة|الخطوة\s*\d+)\s*[:：]\s*(.*)$")
+
+    def labeled_line(self, p, ln, color):
+        m = self.LABEL_RE.match(ln)
+        if m:
+            self.run(p, f"{m.group(1)}: ", bold=True, color=color)
+            self.rich(p, m.group(2))
+        else:
+            self.list_or_rich(p, ln)
 
     def list_or_rich(self, p, ln):
         m = re.match(r"^[-*•]\s+(.*)$", ln)
@@ -413,8 +449,8 @@ class Builder:
         # دليل الرموز
         p = self.para(space_after=4, keep=True)
         self.run(p, "دليل الصناديق في هذا الملف", bold=True, size=13, color=self.c["dk"])
-        legend = ["doctor", "exam", "note", "remember", "tip", "mistake"]
-        t = self.table(3, 2)
+        legend = ["doctor", "exam", "define", "why", "problem", "note", "remember", "tip", "mistake", "check"]
+        t = self.table((len(legend) + 1) // 2, 2)
         for i, k in enumerate(legend):
             title, bar, bg = self.CALLOUTS[k]
             c = t.cell(i // 2, i % 2)
@@ -545,10 +581,8 @@ class Builder:
                 if first_h1:
                     continue
                 self.callout(bl["kind"], bl["head"], bl["body"])
-                if bl["kind"] == "doctor":
-                    self.doctor_points.append((self.current_h1, bl["head"], bl["body"]))
-                elif bl["kind"] == "exam":
-                    self.exam_qs.append((self.current_h1, bl["head"], bl["body"]))
+                if bl["kind"] in self.collected:
+                    self.collected[bl["kind"]].append((self.current_h1, bl["head"], bl["body"]))
 
     def review(self):
         self.page_break()
@@ -558,45 +592,65 @@ class Builder:
         self.run(p, "  ★  ملحق المراجعة قبل الامتحان  ", bold=True, size=19, color=RGBColor(255, 255, 255))
         self.bookmark(p, "review")
         self.rich(self.para(align="justify"),
-                  "هذا الملحق يجمع تلقائياً كل ما **شدّد عليه الدكتور** وكل **الأسئلة** التي لمّح أنها قد تأتي، "
-                  "مرتبةً حسب الفصول، مع الفكرة الأساسية لكل منها حتى تراجعها بسرعة ليلة الامتحان.")
+                  "هذا الملحق يجمع تلقائياً من كل المحاضرة: ما **شدّد عليه الدكتور**، و**التعاريف**، "
+                  "و**علّل**، و**المسائل المحلولة**، و**الأسئلة المتوقعة**، مرتبةً حسب الفصول، "
+                  "حتى تراجعها بسرعة ليلة الامتحان.")
+        ordinals = iter(["أولاً", "ثانياً", "ثالثاً", "رابعاً", "خامساً", "سادساً"])
+        c = self.collected
 
-        self.heading(2, f"أولاً: ما شدّد عليه الدكتور ({len(self.doctor_points)})")
-        last = None
-        for i, (sec, head, body) in enumerate(self.doctor_points, 1):
-            if sec != last:
-                q = self.para(space_after=2, keep=True)
-                self.run(q, f"◂ {sec}", bold=True, size=11, color=self.c["pr"])
-                last = sec
-            p = self.para(space_after=3)
-            self.indent_start(p, 0.9, 0.7)
-            self.run(p, f"{i}.  ", bold=True, color=RGBColor.from_string("C98A0B"))
-            self.rich(p, head)
-            for ln in body:
-                q = self.para(space_after=2)
-                self.indent_start(q, 1.6, 0)
-                self.rich(q, re.sub(r"^[-*•]\s+", "• ", ln), size=12)
+        if c["doctor"]:
+            self.heading(2, f"{next(ordinals)}: ما شدّد عليه الدكتور ({len(c['doctor'])})")
+            last = None
+            for i, (sec, head, body) in enumerate(c["doctor"], 1):
+                if sec != last:
+                    q = self.para(space_after=2, keep=True)
+                    self.run(q, f"◂ {sec}", bold=True, size=11, color=self.c["pr"])
+                    last = sec
+                p = self.para(space_after=3)
+                self.indent_start(p, 0.9, 0.7)
+                self.run(p, f"{i}.  ", bold=True, color=RGBColor.from_string("C98A0B"))
+                self.rich(p, head)
+                for ln in body:
+                    q = self.para(space_after=2)
+                    self.indent_start(q, 1.6, 0)
+                    self.rich(q, re.sub(r"^[-*•]\s+", "• ", ln), size=12)
 
-        self.heading(2, f"ثانياً: بنك الأسئلة ({len(self.exam_qs)})")
-        for i, (sec, head, body) in enumerate(self.exam_qs, 1):
-            t = self.table(1, 1)
-            c = t.cell(0, 0)
-            self.cell_fmt(c, fill="FDEDEF" if i % 2 else "FFFFFF", borders=("B23A48", 4), margin_cm=0.3)
-            p = self.cell_para(c, True)
-            self.run(p, f"س{i}: ", bold=True, color=RGBColor.from_string("B23A48"))
-            self.rich(p, head, base_bold=True)
-            for ln in body:
-                q = self.cell_para(c)
-                if re.match(r"^(الجواب|الفكرة|الحل)\s*[:：]", ln):
-                    k, v = re.split(r"[:：]", ln, maxsplit=1)
-                    self.run(q, f"{k}: ", bold=True, color=self.c["pr"])
-                    self.rich(q, v.strip())
-                else:
-                    self.list_or_rich(q, ln)
-            q = self.cell_para(c)
-            self.run(q, f"(من: {sec})", size=9, color=RGBColor(0x88, 0x88, 0x88))
-            self.keep_together(t)
-            self.para(space_after=0).paragraph_format.line_spacing = 0.5
+        if c["define"]:
+            self.heading(2, f"{next(ordinals)}: التعاريف ({len(c['define'])})")
+            rows = [["المصطلح", "التعريف"]] + [[h, " ".join(b)] for _, h, b in c["define"]]
+            t = self.table(len(rows), 2, widths_cm=[4.5, 12.5])
+            for i, r in enumerate(rows):
+                for j, txt in enumerate(r):
+                    cell = t.cell(i, j)
+                    if i == 0:
+                        self.cell_fmt(cell, fill="00796B", borders=("00796B", 6))
+                        self.run(self.cell_para(cell, True), txt, bold=True, size=11.5, color=RGBColor(255, 255, 255))
+                    else:
+                        self.cell_fmt(cell, fill="E0F2F1" if i % 2 == 0 else "FFFFFF", borders=("BFBFBF", 4))
+                        self.rich(self.cell_para(cell, True), txt, size=11.5, base_bold=(j == 0))
+            self.keep_together(t, header_rows=1, whole=False)
+            self.para(space_after=4)
+
+        for kind, title, prefix in (("why", "علّل", "علّل"), ("problem", "المسائل المحلولة", "مسألة"),
+                                    ("exam", "بنك الأسئلة", "س")):
+            if not c[kind]:
+                continue
+            _, bar, bg = self.CALLOUTS[kind]
+            self.heading(2, f"{next(ordinals)}: {title} ({len(c[kind])})")
+            for i, (sec, head, body) in enumerate(c[kind], 1):
+                t = self.table(1, 1)
+                cell = t.cell(0, 0)
+                self.cell_fmt(cell, fill=bg if i % 2 else "FFFFFF", borders=(bar, 4), margin_cm=0.3)
+                p = self.cell_para(cell, True)
+                self.run(p, f"{prefix} {i}: " if prefix != "س" else f"س{i}: ", bold=True,
+                         color=RGBColor.from_string(bar))
+                self.rich(p, head, base_bold=True)
+                for ln in body:
+                    self.labeled_line(self.cell_para(cell), ln, self.c["pr"])
+                q = self.cell_para(cell)
+                self.run(q, f"(من: {sec})", size=9, color=RGBColor(0x88, 0x88, 0x88))
+                self.keep_together(t)
+                self.para(space_after=0).paragraph_format.line_spacing = 0.5
 
 
 def build(md_path: Path, cover=True) -> Path:
