@@ -75,7 +75,8 @@ def put(parent, tag, **attrs):
 
 AR = re.compile(r"[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]")
 NON_AR = re.compile(r"[^\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+")
-EDGE_PUNCT = " \t.,،:;؛!?؟\"'«»"
+EDGE_PUNCT = " \t.,،:;؛!?؟\"'«»=→←×÷≈≤≥<>"
+LEAD_ONLY = "+"  # "+" في أول المقطع تتبع العربي (بين حدّين)، أما في آخره فهي شحنة (Ca2+) فتبقى
 
 
 def split_scripts(text: str):
@@ -88,12 +89,17 @@ def split_scripts(text: str):
         if not re.search(r"[A-Za-z0-9\u00B5\u0370-\u03FF]", chunk):
             continue  # فراغات/ترقيم فقط: تبقى مع العربي
         # قصّ الأطراف: ترقيم، فراغات، وأقواس غير متوازنة
-        while chunk and (chunk[0] in EDGE_PUNCT or (chunk[0] == "(" and chunk.count("(") > chunk.count(")"))
+        while chunk and (chunk[0] in EDGE_PUNCT or (chunk[0] in LEAD_ONLY and len(chunk) > 1 and chunk[1] == " ")
+                         or (chunk[0] == "(" and chunk.count("(") > chunk.count(")"))
                          or chunk[0] == ")"):
             chunk, a = chunk[1:], a + 1
         while chunk and (chunk[-1] in EDGE_PUNCT or (chunk[-1] == ")" and chunk.count(")") > chunk.count("("))
-                         or chunk[-1] == "("):
+                         or chunk[-1] == "("
+                         # شَرطة ملتصقة بكلمة عربية بعدها (9,10-ثنائي) تتبع العربي
+                         or (chunk[-1] in "-–" and b < len(text) and AR.match(text[b]))):
             chunk, b = chunk[:-1], b - 1
+        while chunk and chunk[0] in "-–" and a > 0 and AR.match(text[a - 1]):  # (أوميغا-3)
+            chunk, a = chunk[1:], a + 1
         if not chunk:
             continue
         if a > pos:
@@ -269,6 +275,9 @@ class Builder:
             for row in t.rows:
                 for c, w in zip(row.cells, widths_cm):
                     c.width = Cm(w)
+            # Word و LibreOffice يعتمدان على tblGrid في التخطيط الثابت
+            for gc, w in zip(t._tbl.tblGrid.findall(qn("w:gridCol")), widths_cm):
+                gc.set(qn("w:w"), str(int(w * 567)))
         return t
 
     def cell_fmt(self, cell, fill=None, borders=None, margin_cm=0.25):
@@ -464,11 +473,12 @@ class Builder:
         self.doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
 
     # ─────────────── المحتوى ───────────────
-    def h1(self, text):
+    def h1(self, text, new_page=False):
         n = len(self.h1s) + 1
         self.h1s.append(text)
         self.current_h1 = text
         p = self.doc.add_heading(level=1)
+        p.paragraph_format.page_break_before = new_page
         put(p._p.get_or_add_pPr(), "w:bidi")
         self.shade_par(p, self.hex["pr"])
         self.run(p, f"  {n}.  {text}  ", bold=True, size=19, color=RGBColor(255, 255, 255))
@@ -530,9 +540,36 @@ class Builder:
             im.save(out, quality=88) if photo else im.save(out, optimize=True)
         return out
 
+    def equation(self, text):
+        """معادلة كيميائية في الوسط داخل إطار خفيف.
+        رموز فقط → فقرة LTR. فيها كلمات عربية → فقرة RTL والسهم ← (المتفاعلات يميناً والنواتج يساراً)."""
+        p = self.doc.add_paragraph()
+        if AR.search(text):
+            put(p._p.get_or_add_pPr(), "w:bidi")
+            text = text.replace("→", "←")
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(4)
+        p.paragraph_format.space_after = Pt(8)
+        p.paragraph_format.keep_together = True
+        self.shade_par(p, self.hex["lt"])
+        plain = re.sub(r"[~^]", "", text)
+        size = 13.5 if len(plain) <= 52 else max(9.5, 13.5 * 52 / len(plain))
+        self.rich(p, text, size=size, color=self.c["dk"], base_bold=True)
+
     def md_table(self, rows):
         ncol = max(len(r) for r in rows)
-        t = self.table(len(rows), ncol)
+        # عرض كل عمود حسب أطول نص فيه (بدون رموز التنسيق)، مجموعها = عرض الصفحة 17 سم
+        def plen(x):
+            return len(re.sub(r"[*=~^]", "", x))
+        need = []
+        for j in range(ncol):
+            body = [plen(r[j]) for r in rows[1:] if j < len(r)] or [0]
+            head = plen(rows[0][j]) if j < len(rows[0]) else 0
+            need.append(max(max(body), head * 0.6, 4))
+        tot = sum(need)
+        widths = [max(1.9, 17.0 * n / tot) for n in need]
+        k = 17.0 / sum(widths)
+        t = self.table(len(rows), ncol, widths_cm=[w * k for w in widths])
         for i, r in enumerate(rows):
             for j in range(ncol):
                 c = t.cell(i, j)
@@ -551,10 +588,9 @@ class Builder:
         for bl in blocks:
             t = bl["t"]
             if t == "h1":
-                if not first_h1:
-                    self.page_break()
+                # page_break_before بدل فقرة فاصلة (الفقرة الفاصلة قد تولّد صفحة فارغة إذا امتلأت الصفحة قبلها)
+                self.h1(bl["text"], new_page=not first_h1)
                 first_h1 = False
-                self.h1(bl["text"])
             elif t in ("h2", "h3"):
                 self.heading(int(t[1]), bl["text"])
             elif t == "p":
@@ -571,6 +607,8 @@ class Builder:
                 self.rich(p, bl["text"])
             elif t == "img":
                 self.image(bl["src"], bl["caption"])
+            elif t == "eq":
+                self.equation(bl["text"])
             elif t == "table":
                 self.md_table(bl["rows"])
             elif t == "pagebreak":
@@ -585,8 +623,8 @@ class Builder:
                     self.collected[bl["kind"]].append((self.current_h1, bl["head"], bl["body"]))
 
     def review(self):
-        self.page_break()
         p = self.doc.add_heading(level=1)
+        p.paragraph_format.page_break_before = True
         put(p._p.get_or_add_pPr(), "w:bidi")
         self.shade_par(p, self.hex["dk"])
         self.run(p, "  ★  ملحق المراجعة قبل الامتحان  ", bold=True, size=19, color=RGBColor(255, 255, 255))

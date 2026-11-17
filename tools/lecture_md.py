@@ -17,6 +17,7 @@
     صيغ: H~2~O (سفلي)  Ca^2+^ (علوي) — تعمل داخل **الغامق** أيضاً
     ![تعليق الصورة](images/x.png)
     | جدول | ... |
+    $$ R–COOH + R′–OH → R–COO–R′ + H~2~O      معادلة: سطر مستقل في الوسط، من اليسار لليمين
     <<<pagebreak>>>
 """
 import re
@@ -51,6 +52,8 @@ def parse(text: str):
         s = ln.strip()
         if not s:
             flush(); i += 1; continue
+        if s.startswith("$$ "):
+            flush(); blocks.append({"t": "eq", "text": s[3:].strip()}); i += 1; continue
         if s == "<<<pagebreak>>>":
             flush(); blocks.append({"t": "pagebreak"}); i += 1; continue
         m = re.match(r"^(#{1,3})\s+(.*)$", s)
