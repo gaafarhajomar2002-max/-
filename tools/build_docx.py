@@ -372,6 +372,14 @@ class Builder:
                           r"كيف يحدث|كيف تعمل|كيف يعمل|المصدر)\s*[:：؟?]?\s*[:：]\s*(.*)$")
 
     def labeled_line(self, p, ln, color):
+        if not AR.search(ln) and re.search(r"[→←⇌=+]", ln):
+            # سطر رموز فقط (معادلة داخل صندوق): فقرة LTR في الوسط حتى لا ينقلب ترتيب المتفاعلات والنواتج
+            pPr = p._p.get_or_add_pPr()
+            for el in pPr.findall(qn("w:bidi")):
+                pPr.remove(el)
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            self.rich(p, ln, base_bold=True)
+            return
         m = self.LABEL_RE.match(ln)
         if m:
             self.run(p, f"{m.group(1)}: ", bold=True, color=color)
@@ -591,7 +599,7 @@ class Builder:
             head = plen(rows[0][j]) if j < len(rows[0]) else 0
             need.append(max(max(body), head * 0.6, 4))
         tot = sum(need)
-        widths = [max(1.9, 17.0 * n / tot) for n in need]
+        widths = [max(2.4, 17.0 * n / tot) for n in need]
         k = 17.0 / sum(widths)
         t = self.table(len(rows), ncol, widths_cm=[w * k for w in widths])
         for i, r in enumerate(rows):
