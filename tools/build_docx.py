@@ -175,11 +175,17 @@ class Builder:
 
     def run(self, p, text, bold=False, italic=False, size=None, color=None, highlight=False, vert=None):
         """يقسم النص إلى مقاطع عربية/لاتينية حتى تظهر المصطلحات الإنجليزية بالاتجاه الصحيح."""
+        ppr = p._p.pPr
+        rtl_para = ppr is not None and ppr.find(qn("w:bidi")) is not None
         for chunk, rtl in split_scripts(text):
             if not rtl:
                 # علامة اتجاه LRM مخفية على الطرفين: تُبقي الصيغة/المصطلح وحدة واحدة من اليسار لليمين
                 # (بدونها تنتقل + و - والأقواس والأرقام في أول الصيغة إلى الجهة الخطأ داخل السطر العربي)
                 chunk = "\u200e" + chunk + "\u200e"
+            elif rtl_para and not AR.search(chunk):
+                # فاصل محايد (سهم، +، =) بين صيغتين لاتينيتين داخل سطر عربي: علامة RLM تجعله يتبع العربي،
+                # وإلا اندمجت الصيغتان والسهم في جزيرة لاتينية واحدة وانعكس ترتيب المعادلة
+                chunk = "\u200f" + chunk + "\u200f"
             r = p.add_run(chunk)
             rp = r._r.get_or_add_rPr()
             put(rp, "w:rFonts", ascii=self.font, hAnsi=self.font, cs=self.font)
@@ -480,10 +486,21 @@ class Builder:
         self.doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
 
     # ─────────────── المحتوى ───────────────
+    def drop_trailing_spacer(self):
+        """يحذف الفقرة الفارغة الأخيرة (فاصل بعد صندوق) قبل عنوان يبدأ بصفحة جديدة،
+        لأنها إن وقعت أول صفحة جديدة يصبح عندنا صفحة فارغة تماماً."""
+        body = self.doc.element.body
+        last = body[-2] if body[-1].tag == qn("w:sectPr") else body[-1]
+        if last.tag == qn("w:p") and not "".join(last.itertext()).strip() and last.find(".//" + qn("w:drawing")) is None \
+                and last.find(".//" + qn("w:sectPr")) is None and last.find(".//" + qn("w:br")) is None:
+            body.remove(last)
+
     def h1(self, text, new_page=False):
         n = len(self.h1s) + 1
         self.h1s.append(text)
         self.current_h1 = text
+        if new_page:
+            self.drop_trailing_spacer()
         p = self.doc.add_heading(level=1)
         p.paragraph_format.page_break_before = new_page
         put(p._p.get_or_add_pPr(), "w:bidi")
@@ -630,6 +647,7 @@ class Builder:
                     self.collected[bl["kind"]].append((self.current_h1, bl["head"], bl["body"]))
 
     def review(self):
+        self.drop_trailing_spacer()
         p = self.doc.add_heading(level=1)
         p.paragraph_format.page_break_before = True
         put(p._p.get_or_add_pPr(), "w:bidi")

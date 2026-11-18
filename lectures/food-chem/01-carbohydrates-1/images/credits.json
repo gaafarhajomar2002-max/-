@@ -1,0 +1,37 @@
+{
+  "alpha_glucose.png": {
+    "source": "https://commons.wikimedia.org/wiki/File:Alpha-D-Glucopyranose-with-H.png",
+    "creator": "Jorge Stolfi",
+    "license": "CC BY-SA 4.0"
+  },
+  "beta_glucose.png": {
+    "source": "https://commons.wikimedia.org/wiki/File:Beta-D-Glucopyranose-with-H.png",
+    "creator": "Jorge Stolfi",
+    "license": "CC BY-SA 4.0"
+  },
+  "mutarotation.jpg": {
+    "source": "https://commons.wikimedia.org/wiki/File:Mutarotation_of_glucose.jpg",
+    "creator": "Unknown authorUnknown author",
+    "license": "CC BY-SA 4.0"
+  },
+  "amylose_helix.jpg": {
+    "source": "https://commons.wikimedia.org/wiki/File:%28a%29_Amylose_is_a_linear_chain_of_%CE%B1-D-glucose_-%28b%29_Because_of_hydrogen_bonding_amylose_acquires_a_spiral_structure.jpg",
+    "creator": "Unknown authorUnknown author",
+    "license": "CC BY-SA 4.0"
+  },
+  "fischer_to_haworth.png": {
+    "source": "https://commons.wikimedia.org/wiki/File:D-glucose_%2B_beta-D-glucopyranose_v.01.svg",
+    "creator": "Benff",
+    "license": "Public domain"
+  },
+  "starch_branches.png": {
+    "source": "https://commons.wikimedia.org/wiki/File:XBio_illustration_%E2%80%93_Starch.png",
+    "creator": "explorebiology",
+    "license": "CC BY 4.0"
+  },
+  "amylopectin_chains.jpg": {
+    "source": "https://commons.wikimedia.org/wiki/File:Amylopectin_chains.jpg",
+    "creator": "Laghi.l",
+    "license": "CC BY-SA 3.0"
+  }
+}

@@ -31,3 +31,5 @@ lectures/**/*.flac
 # صندوق الاستلام المؤقت: الملفات تنتقل لمجلدات المحاضرات بعد الفرز وتُرفع من هناك
 inbox/drive/
 inbox/dense/
+lectures/**/source/pages/
+lectures/**/source/text/
