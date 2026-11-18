@@ -202,10 +202,13 @@ class Builder:
     def rich(self, p, text, size=None, color=None, base_bold=False, italic=False, highlight=False):
         """**غامق** ==تظليل== *مائل*  H~2~O (سفلي)  Ca^2+^ (علوي) — ويمكن تداخلها."""
         kw = dict(size=size, color=color)
-        for tok in re.split(r"(\*\*.+?\*\*|==.+?==|(?<!\*)\*[^*]+?\*(?!\*)|~[^~\s]+~|\^[^^\s]+\^)", text):
+        for tok in re.split(r"(\{ص[^{}]*\}|\*\*.+?\*\*|==.+?==|(?<!\*)\*[^*]+?\*(?!\*)|~[^~\s]+~|\^[^^\s]+\^)",
+                            text):
             if not tok:
                 continue
-            if len(tok) > 2 and tok[0] == tok[-1] and tok[0] in "~^":
+            if tok.startswith("{ص") and tok.endswith("}"):  # مرجع صفحة في المصدر المكتوب
+                self.run(p, " [" + tok[1:-1].strip() + "]", size=8.5, color=RGBColor(0x8A, 0x8A, 0x8A))
+            elif len(tok) > 2 and tok[0] == tok[-1] and tok[0] in "~^":
                 self.run(p, tok[1:-1], bold=base_bold, italic=italic, highlight=highlight,
                          vert="subscript" if tok[0] == "~" else "superscript", **kw)
             elif tok.startswith("**") and len(tok) > 4:
@@ -333,6 +336,7 @@ class Builder:
         "problem":  ("∑ مسألة محلولة",                    "37474F", "ECEFF1"),
         "check":    ("⚠ تحقّق من هذه النقطة (غير واضحة بالتسجيل)", "D84315", "FBE9E7"),
         "admin":    ("☰ معلومة من الدكتور (امتحان، مراجع، مواعيد)", "5D4037", "EFEBE9"),
+        "explain":  ("✦ شرح النقطة: كيف نكتبها، لماذا، من أين، وكيف تحدث", "00838F", "E0F7FA"),
         "style":    ("نمط الدكتور في الشرح والأسئلة",     "6A4C93", "F1ECF8"),
     }
 
@@ -356,9 +360,10 @@ class Builder:
         sp = self.para(space_after=2)  # فاصل بعد الصندوق
         sp.paragraph_format.line_spacing = 0.6
 
-    QA_KINDS = ("exam", "define", "why", "problem")
+    QA_KINDS = ("exam", "define", "why", "problem", "explain")
     LABEL_RE = re.compile(r"^(الجواب|الفكرة|الحل|لأن|لأنّ|السبب|التعريف|المعطيات|المطلوب|القانون|النتيجة|"
-                          r"التعويض|الوحدة|ملاحظة|الخطوة\s*\d+)\s*[:：]\s*(.*)$")
+                          r"التعويض|الوحدة|ملاحظة|الخطوة\s*\d+|كيف نكتبها|كيف نكتبه|لماذا|من أين|كيف تحدث|"
+                          r"كيف يحدث|كيف تعمل|كيف يعمل|المصدر)\s*[:：؟?]?\s*[:：]\s*(.*)$")
 
     def labeled_line(self, p, ln, color):
         m = self.LABEL_RE.match(ln)
@@ -459,8 +464,8 @@ class Builder:
         # دليل الرموز
         p = self.para(space_after=4, keep=True)
         self.run(p, "دليل الصناديق في هذا الملف", bold=True, size=13, color=self.c["dk"])
-        legend = ["doctor", "exam", "define", "why", "problem", "note", "remember", "tip", "mistake", "check",
-                  "admin", "summary"]
+        legend = ["doctor", "exam", "define", "why", "problem", "explain", "note", "remember", "tip", "mistake",
+                  "check", "admin"]
         t = self.table((len(legend) + 1) // 2, 2)
         for i, k in enumerate(legend):
             title, bar, bg = self.CALLOUTS[k]
