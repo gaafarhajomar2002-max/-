@@ -33,3 +33,4 @@ inbox/drive/
 inbox/dense/
 lectures/**/source/pages/
 lectures/**/source/text/
+**/transcript.partial.txt

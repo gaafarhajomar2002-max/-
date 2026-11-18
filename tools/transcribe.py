@@ -155,7 +155,9 @@ def main() -> None:
     )
 
     lines, plain, srt, unsure = [], [], [], []
-    live = (out / "transcript.txt").open("w", encoding="utf-8")  # يُكتب أولاً بأول (يمكن قراءته أثناء التفريغ)
+    # يُكتب أولاً بأول في ملف مؤقت (خارج git، يمكن قراءته أثناء التفريغ)، ويُعاد تسميته عند الانتهاء
+    partial = out / "transcript.partial.txt"
+    live = partial.open("w", encoding="utf-8")
     for i, seg in enumerate(segments, 1):
         text = seg.text.strip()
         if not text or is_hallucination(text):
@@ -173,6 +175,7 @@ def main() -> None:
               end="", flush=True)
 
     live.close()
+    partial.replace(out / "transcript.txt")
     (out / "transcript_uncertain.txt").write_text("\n".join(unsure) + "\n", encoding="utf-8")
     (out / "transcript_plain.txt").write_text(" ".join(plain) + "\n", encoding="utf-8")
     (out / "transcript.srt").write_text("\n".join(srt), encoding="utf-8")
