@@ -529,7 +529,7 @@ class Builder:
         from PIL import Image
         with Image.open(path) as im:
             w, h = im.size
-        width = 12.5
+        width = 16.5 if w / h >= 2 else 12.5   # الصور العريضة (معادلات، سلاسل، مقارنات) بعرض الصفحة
         if h / w * width > 9:       # حدّ أقصى للارتفاع حتى لا تترك الصور فراغات كبيرة
             width = 9 * w / h
         p = self.para(align="center", space_after=2, keep=True)

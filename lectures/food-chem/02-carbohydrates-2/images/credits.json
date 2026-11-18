@@ -1,0 +1,102 @@
+{
+ "glucosamine.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:N-acetylgalactosamine_and_N-acetylglucosamine.png",
+  "creator": "Unknown authorUnknown author",
+  "license": "CC BY-SA 4.0"
+ },
+ "hyaluronic.jpg": {
+  "source": "https://commons.wikimedia.org/wiki/File:Hyaluronic_Acid_Structure.jpg",
+  "creator": "K.southwick",
+  "license": "CC0"
+ },
+ "heparin.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Heparin_pharmacophore_haworth_v.01.svg",
+  "creator": "Benff",
+  "license": "CC0"
+ },
+ "salicin.jpg": {
+  "source": "https://commons.wikimedia.org/wiki/File:Salicin_metabolism.jpg",
+  "creator": "Yyfroy",
+  "license": "CC0"
+ },
+ "amygdalin.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Benzaldehyde-chemical-amygdalin.svg",
+  "creator": "Д.Ильин: vectorization",
+  "license": "CC0"
+ },
+ "stevia.jpg": {
+  "source": "https://commons.wikimedia.org/wiki/File:Stevia_rebaudiana_%28potted_plant%29.jpg",
+  "creator": "Gabriela F. Ruellan",
+  "license": "CC0"
+ },
+ "maltose.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Maltose2.svg",
+  "creator": "Wikimedia Commons",
+  "license": "راجع صفحة الملف"
+ },
+ "sucrose.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Saccharose2.svg",
+  "creator": "Wikimedia Commons",
+  "license": "راجع صفحة الملف"
+ },
+ "lactose.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:%CE%92-lactose_%28Haworth_projection%29.png",
+  "creator": "Assaiki",
+  "license": "Public domain"
+ },
+ "raffinose.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Haworth_structure_of_raffinose.png",
+  "creator": "Dulllightabout",
+  "license": "CC0"
+ },
+ "cyclodextrins.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Structure_of_native_cyclodextrins.png",
+  "creator": "Valliappan Kannappan",
+  "license": "CC BY-SA 4.0"
+ },
+ "amylase.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Amylase_reaction.png",
+  "creator": "BQmUB2012134",
+  "license": "CC0"
+ },
+ "pectic_acid.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Pektin1.svg",
+  "creator": "Wikimedia Commons",
+  "license": "راجع صفحة الملف"
+ },
+ "pectin_ester.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Pektin2.svg",
+  "creator": "NEUROtiker",
+  "license": "Public domain"
+ },
+ "agar.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Agarose_polymere.svg",
+  "creator": "Yikrazuul",
+  "license": "Public domain"
+ },
+ "alginate.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Alginic_acid_diagram.png",
+  "creator": "Xiaolin Zhang, Xinran Wang, Wei Fan, Yi Liu, Qi Wang, and Lin Weng",
+  "license": "CC BY 4.0"
+ },
+ "cellulose.jpg": {
+  "source": "https://commons.wikimedia.org/wiki/File:Cellulose_structure.jpg",
+  "creator": "Vicente Neto",
+  "license": "CC BY 4.0"
+ },
+ "cmc.png": {
+  "source": "https://commons.wikimedia.org/wiki/File:Carboxymethyl_cellulose_sodium.svg",
+  "creator": "Benff",
+  "license": "Public domain"
+ },
+ "disaccharides.png": {
+  "source": "Maltose2.svg + β-lactose (Haworth).png + Saccharose2.svg",
+  "creator": "تجميع من صور ويكيميديا: Maltose2، Assaiki، Saccharose2",
+  "license": "Public domain / راجع صفحات الملفات"
+ },
+ "pectin_compare.png": {
+  "source": "Pektin1.svg + Pektin2.svg",
+  "creator": "تجميع من صور ويكيميديا: Pektin1، NEUROtiker (Pektin2)",
+  "license": "Public domain / راجع صفحات الملفات"
+ }
+}
