@@ -27,3 +27,6 @@ lectures/**/*.3gp
 lectures/**/*.mp4
 lectures/**/*.webm
 lectures/**/*.flac
+
+# صندوق الاستلام المؤقت: الملفات تنتقل لمجلدات المحاضرات بعد الفرز وتُرفع من هناك
+inbox/drive/
