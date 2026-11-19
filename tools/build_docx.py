@@ -528,6 +528,14 @@ class Builder:
         self.rich(p, text, size=16 if level == 2 else 14, color=self.c["dk" if level == 2 else "pr"], base_bold=True)
 
     def image(self, src, caption):
+        # خيارات اختيارية بعد | في المسار: w=عرض بالسم، h=أقصى ارتفاع بالسم. مثال: images/map.png|h=22
+        opts = {}
+        if "|" in src:
+            src, raw = src.split("|", 1)
+            for kv in raw.split(","):
+                if "=" in kv:
+                    k, v = kv.split("=", 1)
+                    opts[k.strip()] = float(v)
         path = (self.base / src).resolve()
         if not path.exists():
             p = self.para(align="center"); self.run(p, f"[صورة مفقودة: {src}]", color=RGBColor(200, 0, 0))
@@ -537,9 +545,10 @@ class Builder:
         from PIL import Image
         with Image.open(path) as im:
             w, h = im.size
-        width = 16.5 if w / h >= 2 else 12.5   # الصور العريضة (معادلات، سلاسل، مقارنات) بعرض الصفحة
-        if h / w * width > 9:       # حدّ أقصى للارتفاع حتى لا تترك الصور فراغات كبيرة
-            width = 9 * w / h
+        width = opts.get("w", 16.5 if w / h >= 2 else 12.5)   # الصور العريضة (معادلات، سلاسل، مقارنات) بعرض الصفحة
+        maxh = opts.get("h", 9)     # حدّ أقصى للارتفاع حتى لا تترك الصور فراغات كبيرة
+        if h / w * width > maxh:
+            width = maxh * w / h
         p = self.para(align="center", space_after=2, keep=True)
         p.add_run().add_picture(str(path), width=Cm(width))
         self.fig += 1
