@@ -76,6 +76,7 @@ def put(parent, tag, **attrs):
 AR = re.compile(r"[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]")
 NON_AR = re.compile(r"[^\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+")
 EDGE_PUNCT = " \t.,،:;؛!?؟\"'«»=→←×÷≈≤≥<>"
+FORMULA_RE = re.compile(r"(?:[A-Za-z0-9()\[\]+\-–−=/]|~[^~\s]+~|\^[^^\s]+\^)+")  # صيغة متصلة بلا فراغات
 LEAD_ONLY = "+"  # "+" في أول المقطع تتبع العربي (بين حدّين)، أما في آخره فهي شحنة (Ca2+) فتبقى
 
 
@@ -173,15 +174,18 @@ class Builder:
             p.paragraph_format.keep_with_next = True
         return p
 
-    def run(self, p, text, bold=False, italic=False, size=None, color=None, highlight=False, vert=None):
-        """يقسم النص إلى مقاطع عربية/لاتينية حتى تظهر المصطلحات الإنجليزية بالاتجاه الصحيح."""
+    def run(self, p, text, bold=False, italic=False, size=None, color=None, highlight=False, vert=None, ltr=False,
+            lrm=(True, True)):
+        """يقسم النص إلى مقاطع عربية/لاتينية حتى تظهر المصطلحات الإنجليزية بالاتجاه الصحيح.
+        ltr=True: النص قطعة من صيغة كيميائية، يُكتب كله من اليسار لليمين (مع أقواسه) دون تقسيم."""
         ppr = p._p.pPr
         rtl_para = ppr is not None and ppr.find(qn("w:bidi")) is not None
-        for chunk, rtl in split_scripts(text):
+        for chunk, rtl in ([(text, False)] if ltr else split_scripts(text)):
             if not rtl:
                 # علامة اتجاه LRM مخفية على الطرفين: تُبقي الصيغة/المصطلح وحدة واحدة من اليسار لليمين
                 # (بدونها تنتقل + و - والأقواس والأرقام في أول الصيغة إلى الجهة الخطأ داخل السطر العربي)
-                chunk = "\u200e" + chunk + "\u200e"
+                # داخل الصيغة الواحدة توضع فقط على طرفيها (lrm) حتى لا ينكسر السطر بين قطعها
+                chunk = ("\u200e" if lrm[0] else "") + chunk + ("\u200e" if lrm[1] else "")
             elif rtl_para and not AR.search(chunk):
                 # فاصل محايد (سهم، +، =) بين صيغتين لاتينيتين داخل سطر عربي: علامة RLM تجعله يتبع العربي،
                 # وإلا اندمجت الصيغتان والسهم في جزيرة لاتينية واحدة وانعكس ترتيب المعادلة
@@ -208,24 +212,55 @@ class Builder:
     def rich(self, p, text, size=None, color=None, base_bold=False, italic=False, highlight=False):
         """**غامق** ==تظليل== *مائل*  H~2~O (سفلي)  Ca^2+^ (علوي) — ويمكن تداخلها."""
         kw = dict(size=size, color=color)
-        for tok in re.split(r"(\{ص[^{}]*\}|\*\*.+?\*\*|==.+?==|(?<!\*)\*[^*]+?\*(?!\*)|~[^~\s]+~|\^[^^\s]+\^)",
-                            text):
+        for tok in re.split(r"(\{ص[^{}]*\}|\*\*.+?\*\*|==.+?==|(?<!\*)\*[^*]+?\*(?!\*))", text):
             if not tok:
                 continue
             if tok.startswith("{ص") and tok.endswith("}"):  # مرجع صفحة في المصدر المكتوب
                 self.run(p, " [" + tok[1:-1].strip() + "]", size=8.5, color=RGBColor(0x8A, 0x8A, 0x8A))
-            elif len(tok) > 2 and tok[0] == tok[-1] and tok[0] in "~^":
-                self.run(p, tok[1:-1], bold=base_bold, italic=italic, highlight=highlight,
-                         vert="subscript" if tok[0] == "~" else "superscript", **kw)
             elif tok.startswith("**") and len(tok) > 4:
                 self.rich(p, tok[2:-2], base_bold=True, italic=italic, highlight=highlight, **kw)
             elif tok.startswith("==") and len(tok) > 4:
                 self.rich(p, tok[2:-2], base_bold=True, italic=italic, highlight=True, **kw)
-            elif tok.startswith("*") and len(tok) > 2:
+            elif tok.startswith("*") and len(tok) > 2 and not tok.startswith("**"):
                 self.rich(p, tok[1:-1], base_bold=base_bold, italic=True, highlight=highlight, **kw)
             else:
-                self.run(p, tok, bold=base_bold, italic=italic, highlight=highlight, **kw)
+                self.plain(p, tok, bold=base_bold, italic=italic, highlight=highlight, **kw)
         return p
+
+    def plain(self, p, text, **kw):
+        """نص بلا تنسيق غامق/مائل: الصيغ التي فيها سفلي/علوي (CH~3~(CH~2~)~16~COOH، N^+^(CH~3~)~3~)
+        تُكتب كوحدة واحدة من اليسار لليمين، وإلا تنقلب أقواسها وتتبعثر قطعها داخل السطر العربي."""
+        pos = 0
+        for m in FORMULA_RE.finditer(text):
+            a, b = m.start(), m.end()
+            span = text[a:b]
+            if "~" not in span and "^" not in span:
+                continue
+            # أقواس غير متوازنة وإشارات على الطرفين تبقى للنص العربي حولها
+            while span and (span[0] in "+=/-–−" or span[0] == ")"
+                            or (span[0] == "(" and span.count("(") > span.count(")"))):
+                span, a = span[1:], a + 1
+            while span and (span[-1] in "=/-–(" or (span[-1] == ")" and span.count(")") > span.count("("))):
+                span, b = span[:-1], b - 1
+            if "~" not in span and "^" not in span:
+                continue
+            if a > pos:
+                self.subsup(p, text[pos:a], **kw)
+            self.subsup(p, span, ltr=True, **kw)
+            pos = b
+        if pos < len(text):
+            self.subsup(p, text[pos:], **kw)
+
+    def subsup(self, p, text, ltr=False, **kw):
+        toks = [x for x in re.split(r"(~[^~\s]+~|\^[^^\s]+\^)", text) if x]
+        for i, tok in enumerate(toks):
+            lrm = (i == 0, i == len(toks) - 1) if ltr else (True, True)
+            # وصلة كلمات (WJ) بين قطع الصيغة: لا يُكسر السطر في منتصفها
+            wj = "\u2060" if ltr and i > 0 else ""
+            if len(tok) > 2 and tok[0] == tok[-1] and tok[0] in "~^":
+                self.run(p, wj + tok[1:-1], vert="subscript" if tok[0] == "~" else "superscript", ltr=ltr, lrm=lrm, **kw)
+            else:
+                self.run(p, wj + tok, ltr=ltr, lrm=lrm, **kw)
 
     def shade_par(self, p, fill):
         put(p._p.get_or_add_pPr(), "w:shd", val="clear", color="auto", fill=fill)
