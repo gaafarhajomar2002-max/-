@@ -470,10 +470,23 @@ class Builder:
         self.link(q, "ملحق المراجعة: تنبيهات الدكتور وبنك الأسئلة", "review", self.hex["dk"])
         self.page_break()
 
-        # نمط الدكتور: صناديق [!style] الموجودة قبل أول فصل
+        # نمط الدكتور: صناديق [!style] الموجودة قبل أول فصل، ثم باقي الصناديق التي قبل أول فصل
+        # (وظيفة، موعد امتحان، ملاحظة عن المصادر...) في نفس الصفحة، وتُجمع في الملحق أيضاً
+        pre = []
+        for bl in blocks:
+            if bl["t"] == "h1":
+                break
+            if bl["t"] == "callout":
+                pre.append(bl)
         for bl in blocks:
             if bl["t"] == "callout" and bl["kind"] == "style":
                 self.callout("style", bl["head"], bl["body"])
+        for bl in pre:
+            if bl["kind"] == "style":
+                continue
+            self.callout(bl["kind"], bl["head"], bl["body"])
+            if bl["kind"] in self.collected:
+                self.collected[bl["kind"]].append(("قبل الفصل الأول", bl["head"], bl["body"]))
 
         # دليل الرموز
         p = self.para(space_after=4, keep=True)
@@ -658,7 +671,7 @@ class Builder:
                 if bl["kind"] == "style":
                     continue  # تُعرض في صفحة البطاقة
                 if first_h1:
-                    continue
+                    continue  # صناديق ما قبل أول فصل تُعرض في صفحة نمط الدكتور
                 self.callout(bl["kind"], bl["head"], bl["body"])
                 if bl["kind"] in self.collected:
                     self.collected[bl["kind"]].append((self.current_h1, bl["head"], bl["body"]))
