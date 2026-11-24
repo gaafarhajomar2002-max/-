@@ -80,6 +80,21 @@ FORMULA_RE = re.compile(r"(?:[A-Za-z0-9()\[\]+\-–−=/]|~[^~\s]+~|\^[^^\s]+\^)
 LEAD_ONLY = "+"  # "+" في أول المقطع تتبع العربي (بين حدّين)، أما في آخره فهي شحنة (Ca2+) فتبقى
 
 
+def para_is_rtl(p) -> bool:
+    """فقرة RTL: فيها w:bidi صريح وليس w:val="0" (الفقرات بلا bidi صريح هنا تُعامل كما كانت: ليست RTL)."""
+    ppr = p._p.pPr
+    el = ppr.find(qn("w:bidi")) if ppr is not None else None
+    return el is not None and el.get(qn("w:val")) not in ("0", "false", "off")
+
+
+def set_ltr(p):
+    """فقرة من اليسار لليمين صراحةً (النمط Normal فيه bidi، فلا يكفي حذف العنصر)."""
+    ppr = p._p.get_or_add_pPr()
+    for el in ppr.findall(qn("w:bidi")):
+        ppr.remove(el)
+    put(ppr, "w:bidi", val="0")
+
+
 def split_scripts(text: str):
     """يقسم النص إلى (مقطع, rtl). المقاطع اللاتينية/الرقمية (مصطلحات، صيغ، أرقام) تبقى LTR كوحدة واحدة،
     والأقواس غير المتوازنة والترقيم على أطرافها تُترك للعربي حتى لا ينقلب ترتيبها."""
@@ -180,8 +195,7 @@ class Builder:
             lrm=(True, True)):
         """يقسم النص إلى مقاطع عربية/لاتينية حتى تظهر المصطلحات الإنجليزية بالاتجاه الصحيح.
         ltr=True: النص قطعة من صيغة كيميائية، يُكتب كله من اليسار لليمين (مع أقواسه) دون تقسيم."""
-        ppr = p._p.pPr
-        rtl_para = ppr is not None and ppr.find(qn("w:bidi")) is not None
+        rtl_para = para_is_rtl(p)
         for chunk, rtl in ([(text, False)] if ltr else split_scripts(text)):
             if not rtl:
                 # عزل اتجاه مخفي على الطرفين (LRI … PDI): يُبقي الصيغة/المصطلح وحدة واحدة من اليسار لليمين
@@ -233,6 +247,10 @@ class Builder:
     def plain(self, p, text, **kw):
         """نص بلا تنسيق غامق/مائل: الصيغ التي فيها سفلي/علوي (CH~3~(CH~2~)~16~COOH، N^+^(CH~3~)~3~)
         تُكتب كوحدة واحدة من اليسار لليمين، وإلا تنقلب أقواسها وتتبعثر قطعها داخل السطر العربي."""
+        if not para_is_rtl(p):
+            # فقرة من اليسار لليمين (معادلة بلا عربي): لا حاجة للعزل، والعزل هنا يقلب ترتيب أجزاء المعادلة
+            self.subsup(p, text, **kw)
+            return
         pos = 0
         for m in FORMULA_RE.finditer(text):
             a, b = m.start(), m.end()
@@ -412,9 +430,7 @@ class Builder:
     def labeled_line(self, p, ln, color):
         if not AR.search(ln) and re.search(r"[→←⇌=+]", ln):
             # سطر رموز فقط (معادلة داخل صندوق): فقرة LTR في الوسط حتى لا ينقلب ترتيب المتفاعلات والنواتج
-            pPr = p._p.get_or_add_pPr()
-            for el in pPr.findall(qn("w:bidi")):
-                pPr.remove(el)
+            set_ltr(p)
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             self.rich(p, ln, base_bold=True)
             return
@@ -644,6 +660,8 @@ class Builder:
         if AR.search(text):
             put(p._p.get_or_add_pPr(), "w:bidi")
             text = text.replace("→", "←")
+        else:
+            set_ltr(p)
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_before = Pt(4)
         p.paragraph_format.space_after = Pt(8)
