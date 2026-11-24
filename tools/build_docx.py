@@ -467,7 +467,9 @@ class Builder:
             b.set(qn(f"w:{k}"), v)
         pbdr.append(b)
         m = self.meta
-        self.run(hp, f"{m.get('course', '')}  •  المحاضرة {m.get('lecture', '')}: {m.get('title', '')}",
+        lec = m.get('lecture', '')
+        lec_txt = f"المحاضرة {lec}" if str(lec).strip().isdigit() else str(lec)
+        self.run(hp, f"{m.get('course', '')}  •  {lec_txt}: {m.get('title', '')}",
                  size=9.5, color=self.c["pr"])
         # تذييل: رقم الصفحة
         sec.footer.is_linked_to_previous = False
