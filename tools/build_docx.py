@@ -245,32 +245,15 @@ class Builder:
         return p
 
     def plain(self, p, text, **kw):
-        """نص بلا تنسيق غامق/مائل: الصيغ التي فيها سفلي/علوي (CH~3~(CH~2~)~16~COOH، N^+^(CH~3~)~3~)
-        تُكتب كوحدة واحدة من اليسار لليمين، وإلا تنقلب أقواسها وتتبعثر قطعها داخل السطر العربي."""
+        """نص بلا تنسيق غامق/مائل. في الفقرة العربية: كل مقطع لاتيني متصل (مصطلح، صيغة فيها سفلي/علوي مثل
+        CH~3~(CH~2~)~16~COOH، أو "NAD + H~3~PO~4~") يُكتب كوحدة واحدة معزولة من اليسار لليمين،
+        وإلا تنقلب أقواسه وتتبعثر قطعه داخل السطر العربي."""
         if not para_is_rtl(p):
-            # فقرة من اليسار لليمين (معادلة بلا عربي): لا حاجة للعزل، والعزل هنا يقلب ترتيب أجزاء المعادلة
+            # فقرة من اليسار لليمين (معادلة بلا عربي): لا حاجة للعزل
             self.subsup(p, text, **kw)
             return
-        pos = 0
-        for m in FORMULA_RE.finditer(text):
-            a, b = m.start(), m.end()
-            span = text[a:b]
-            if "~" not in span and "^" not in span:
-                continue
-            # أقواس غير متوازنة وإشارات على الطرفين تبقى للنص العربي حولها
-            while span and (span[0] in "+=/-–−" or span[0] == ")"
-                            or (span[0] == "(" and span.count("(") > span.count(")"))):
-                span, a = span[1:], a + 1
-            while span and (span[-1] in "=/-–(" or (span[-1] == ")" and span.count(")") > span.count("("))):
-                span, b = span[:-1], b - 1
-            if "~" not in span and "^" not in span:
-                continue
-            if a > pos:
-                self.subsup(p, text[pos:a], **kw)
-            self.subsup(p, span, ltr=True, **kw)
-            pos = b
-        if pos < len(text):
-            self.subsup(p, text[pos:], **kw)
+        for chunk, rtl in split_scripts(text):
+            self.subsup(p, chunk, ltr=not rtl, **kw)
 
     def subsup(self, p, text, ltr=False, **kw):
         toks = [x for x in re.split(r"(~[^~\s]+~|\^[^^\s]+\^)", text) if x]
