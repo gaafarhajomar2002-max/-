@@ -115,6 +115,8 @@ def split_scripts(text: str):
 class Builder:
     def __init__(self, meta, base: Path):
         self.meta, self.base = meta, base
+        # plain: yes ← ملف بنفس محتوى المصدر فقط (بلا ملحق مراجعة ولا دليل صناديق، والفصول متتابعة بلا صفحة جديدة)
+        self.source_only = str(meta.get("plain", "")).strip().lower() in ("yes", "true", "1", "نعم")
         pr, dk, lt, ac = THEMES.get(meta.get("theme", "nutrition"), THEMES["nutrition"])
         self.c = {k: RGBColor.from_string(v[1:]) for k, v in dict(pr=pr, dk=dk, lt=lt, ac=ac).items()}
         self.hex = dict(pr=pr[1:], dk=dk[1:], lt=lt[1:], ac=ac[1:])
@@ -182,10 +184,11 @@ class Builder:
         rtl_para = ppr is not None and ppr.find(qn("w:bidi")) is not None
         for chunk, rtl in ([(text, False)] if ltr else split_scripts(text)):
             if not rtl:
-                # علامة اتجاه LRM مخفية على الطرفين: تُبقي الصيغة/المصطلح وحدة واحدة من اليسار لليمين
+                # عزل اتجاه مخفي على الطرفين (LRI … PDI): يُبقي الصيغة/المصطلح وحدة واحدة من اليسار لليمين
+                # (كانت علامات LRM، لكنها تجعل LibreOffice يكسر الكلمة الإنجليزية في آخر السطر: "(B" | "otulic")
                 # (بدونها تنتقل + و - والأقواس والأرقام في أول الصيغة إلى الجهة الخطأ داخل السطر العربي)
                 # داخل الصيغة الواحدة توضع فقط على طرفيها (lrm) حتى لا ينكسر السطر بين قطعها
-                chunk = ("\u200e" if lrm[0] else "") + chunk + ("\u200e" if lrm[1] else "")
+                chunk = ("\u2066" if lrm[0] else "") + chunk + ("\u2069" if lrm[1] else "")
             elif rtl_para and not AR.search(chunk):
                 # فاصل محايد (سهم، +، =) بين صيغتين لاتينيتين داخل سطر عربي: علامة RLM تجعله يتبع العربي،
                 # وإلا اندمجت الصيغتان والسهم في جزيرة لاتينية واحدة وانعكس ترتيب المعادلة
@@ -482,7 +485,8 @@ class Builder:
         self.run(p, "بطاقة المحاضرة", bold=True, size=20, color=self.c["pr"])
         rows = [(k, m.get(key)) for k, key in (
             ("المقرر", "course"), ("رقم المحاضرة", "lecture"), ("العنوان", "title"), ("المحاضِر", "doctor"),
-            ("التاريخ", "date"), ("مدة التسجيل", "duration"), ("السنة / الفصل", "year")) if m.get(key)]
+            ("التاريخ", "date"), ("مدة التسجيل", "duration"), ("المصدر", "source"),
+            ("السنة / الفصل", "year")) if m.get(key)]
         t = self.table(len(rows), 2, widths_cm=[4.2, 12.8])
         for i, (k, v) in enumerate(rows):
             a, b = t.cell(i, 0), t.cell(i, 1)
@@ -500,6 +504,10 @@ class Builder:
             self.indent_start(q, 0.4)
             self.run(q, f"{i}.  ", bold=True, color=self.c["pr"])
             self.link(q, bl["text"], f"sec{i}", self.hex["dk"])
+        if self.source_only:
+            # نسخة "نفس المحتوى فقط": لا ملحق ولا دليل صناديق، ويبدأ المحتوى بعد الفهرس مباشرة
+            self.para(space_after=2)
+            return
         q = self.para(space_after=1); self.indent_start(q, 0.4)
         self.run(q, "★  ", bold=True, color=self.c["ac"])
         self.link(q, "ملحق المراجعة: تنبيهات الدكتور وبنك الأسئلة", "review", self.hex["dk"])
@@ -678,7 +686,7 @@ class Builder:
             t = bl["t"]
             if t == "h1":
                 # page_break_before بدل فقرة فاصلة (الفقرة الفاصلة قد تولّد صفحة فارغة إذا امتلأت الصفحة قبلها)
-                self.h1(bl["text"], new_page=not first_h1)
+                self.h1(bl["text"], new_page=not first_h1 and not self.source_only)
                 first_h1 = False
             elif t in ("h2", "h3"):
                 self.heading(int(t[1]), bl["text"])
@@ -802,7 +810,8 @@ def build(md_path: Path, cover=True) -> Path:
         b._content_section(b.doc.sections[0])
     b.info_page(blocks)
     b.content(blocks)
-    b.review()
+    if not b.source_only:
+        b.review()
     name = meta.get("output") or f"المحاضرة {meta.get('lecture', '')} - {meta.get('title', 'محاضرة')}"
     out = md_path.parent / (re.sub(r'[\\/:*?"<>|]+', "-", name).strip() + ".docx")
     b.doc.core_properties.title = meta.get("title", "")
